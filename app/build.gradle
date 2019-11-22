@@ -1,0 +1,221 @@
+apply plugin: 'com.android.application'
+apply plugin: 'walle'
+//buildDir 代表的是 app 目录下 build 文件夹，
+// 如果创建成果，他会在 build 文件夹中创建 bakApk文件夹，存放 old.apk
+def bakPath = file("${buildDir}/bakApk") //指定基准文件存放位置
+
+android {
+    signingConfigs {
+        config {
+            storeFile file('C:\\Users\\Administrator\\Desktop\\345\\Project\\Tinker\\keystore.jks')
+            storePassword '123456789'
+            keyAlias = 'key0'
+            keyPassword '123456789'
+        }
+    }
+
+    walle {
+        // 指定渠道包的输出路径
+        apkOutputFolder = new File("${project.buildDir}/outputs/channels");
+        // 定制渠道包的APK的文件名称
+        apkFileNameFormat = '${appName}-${channel}-${buildType}-v${versionName}-${versionCode}.apk';
+        // 渠道配置文件
+        channelFile = new File("${project.getProjectDir()}/channel")
+    }
+
+    compileSdkVersion 28
+    buildToolsVersion "29.0.2"
+    defaultConfig {
+        applicationId "com.testdemo.www.tinker"
+        minSdkVersion 14
+        targetSdkVersion 28
+        versionCode 2
+        versionName "1.1"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        flavorDimensions "versionCode"
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.config
+        }
+    }
+
+
+}
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation 'androidx.appcompat:appcompat:1.1.0'
+    implementation 'androidx.constraintlayout:constraintlayout:1.1.3'
+    testImplementation 'junit:junit:4.12'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.1'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.2.0'
+    implementation 'com.squareup.okhttp3:okhttp:3.12.0' //okttp依赖
+
+    implementation 'com.meituan.android.walle:library:1.1.6'
+
+    compileOnly("com.tencent.tinker:tinker-android-anno:${TINKER_VERSION}") { changing = true }
+    annotationProcessor("com.tencent.tinker:tinker-android-anno:${TINKER_VERSION}") {
+        changing = true
+    }
+    // tinker 的核心 sdk 库
+    implementation("com.tinkerpatch.sdk:tinkerpatch-android-sdk:${TINKERPATCH_VERSION}") {
+        changing = true
+    }
+
+
+    //友盟基础组件库和统计SDK库依赖
+    api 'com.umeng.umsdk:analytics:8.0.0'
+    api 'com.umeng.umsdk:common:2.0.0'
+}
+
+
+ext {
+    tinkerEnable = true
+    tinkerID = "1.0"
+    tinkerOldApkPath = "${bakPath}/app-release-1122-14-44-09.apk"
+    tinkerApplyMappingPath = "${bakPath}/app-release-1122-14-44-09-mapping.txt"
+    tinkerApplyResourcePath = "${bakPath}/app-release-1122-14-44-09-R.txt"
+//    tinkerBuildFlavorDirectory = "${bakPath}/app-1122-10-13-08"
+}
+
+//是否启用 tinker
+def buildWithTinker() {
+    return ext.tinkerEnable
+}
+// old 路径
+def getOldApkPath() {
+    return ext.tinkerOldApkPath
+}
+// 混淆文件路径
+def getApplyMappingPath() {
+    return ext.tinkerApplyMappingPath
+}
+// 资源文件路径
+def getApplyResourceMappingPath() {
+    return ext.tinkerApplyResourcePath
+}
+// id
+def getTinkerIdValue() {
+    return ext.tinkerID
+}
+
+//多渠道路径
+def getTinkerBuildFlavorDirectory() {
+    return ext.tinkerBuildFlavorDirectory
+}
+
+if (buildWithTinker()) {
+    //启用 tinker
+    apply plugin: 'com.tencent.tinker.patch'
+
+    //所有 tinker 相关的参数配置
+    tinkerPatch() {
+        oldApk = getOldApkPath() // old.apk 路径
+        ignoreWarning = false //不忽略警告，如果警告取消生成patch
+        useSign = true  // 强制 patch 文件使用签名
+        tinkerEnable = buildWithTinker() //指示是否启用 tinker
+        buildConfig() {
+            applyMapping = getApplyMappingPath() // 指定old.apk 打包时所使用的的混淆文件
+            applyResourceMapping = getApplyResourceMappingPath() // 指定 old.apk 资源文件
+            tinkerId = getTinkerIdValue() //指定 TinkerId
+            keepDexApply = false //一般置为 false，true：生成patch 的时候会根据 dex 文件的分包去动态的编译 patch 文件
+        }
+
+        dex() {
+            dexMode = "jar"  //jar 是配到14以下，会将dex压缩为jar文件，然后进行处理，体积小row只能在14以上使用，直接对 dex 文件处理
+            pattern = ["classes*.dex", "assets/secondary-dex-?.jar"]//指定 dex 文件位于哪些牡蛎
+            loader = ["com.testdemo.www.tinker.MyTinkerApplication"] //指定加载patch文件时所用到的类
+        }
+
+        //工程中的 jar 和 so
+        lib {
+            pattern = ["libs/*/*.so"]
+        }
+
+        res { //指定 tinker 可以修改的资源文件路径
+            pattern = ["res/*", "assets/*", "resources.arsc", "AndroidManifest.xml"]
+            ignoreChange = ["assets/sampple_meta.txt"] //制定不受影响的资源路径，即时修改了这个资源文件，也不会被打入 patch
+            largeModSize = 100 //资源修改大小默认值
+        }
+//-----------------必须项配置完成-------------------------------------
+        //patch的介绍
+        packageConfig {
+            //补丁加载完成后通过 key 可以拿到这些 value
+            configField("patchMessage", "fix 1.0 version's bugs")
+            configField("patchVersion", "1.0")
+        }
+
+        //使用压缩
+        sevenZip {
+            zipArtifact = "com.tencent.mm:SevenZip:1.1.10"
+        }
+    }
+
+    List<String> flavors = new ArrayList<>()
+    project.android.productFlavors.each { flavor ->
+        flavors.add(flavor.name)
+    }
+    boolean hasFlavors = flavors.size() > 0
+    def date = new Date().format("MMdd-HH-mm-ss")
+
+    /**
+     * 复制基准包和其它必须文件到指定目录
+     */
+    android.applicationVariants.all { variant ->
+        /**
+         * task type, you want to bak
+         */
+        def taskName = variant.name
+
+        tasks.all {
+            if ("assemble${taskName.capitalize()}".equalsIgnoreCase(it.name)) {
+
+                it.doLast {
+                    copy {
+                        def fileNamePrefix = "${project.name}-${variant.baseName}"
+                        def newFileNamePrefix = hasFlavors ? "${fileNamePrefix}" : "${fileNamePrefix}-${date}"
+
+                        def destPath = hasFlavors ? file("${bakPath}/${project.name}-${date}/${variant.flavorName}") : bakPath
+
+                        if (variant.metaClass.hasProperty(variant, 'packageApplicationProvider')) {
+                            def packageAndroidArtifact = variant.packageApplicationProvider.get()
+                            if (packageAndroidArtifact != null) {
+                                try {
+                                    from new File(packageAndroidArtifact.outputDirectory.getAsFile().get(), variant.outputs.first().apkData.outputFileName)
+                                } catch (Exception e) {
+                                    from new File(packageAndroidArtifact.outputDirectory, variant.outputs.first().apkData.outputFileName)
+                                }
+                            } else {
+                                from variant.outputs.first().mainOutputFile.outputFile
+                            }
+                        } else {
+                            from variant.outputs.first().outputFile
+                        }
+
+                        into destPath
+                        rename { String fileName ->
+                            fileName.replace("${fileNamePrefix}.apk", "${newFileNamePrefix}.apk")
+                        }
+
+                        from "${buildDir}/outputs/mapping/${variant.dirName}/mapping.txt"
+                        into destPath
+                        rename { String fileName ->
+                            fileName.replace("mapping.txt", "${newFileNamePrefix}-mapping.txt")
+                        }
+
+                        from "${buildDir}/intermediates/symbols/${variant.dirName}/R.txt"
+                        from "${buildDir}/intermediates/symbol_list/${variant.dirName}/R.txt"
+                        into destPath
+                        rename { String fileName ->
+                            fileName.replace("R.txt", "${newFileNamePrefix}-R.txt")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
